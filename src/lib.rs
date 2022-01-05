@@ -171,10 +171,15 @@ fn create_proxied_response<B>(mut response: Response<B>) -> Response<B> {
     response
 }
 
-fn forward_uri<B>(forward_url: &str, req: &Request<B>) -> Result<Uri, InvalidUri> {
+fn forward_uri<B>(
+    forward_url: &str,
+    remove_path_substring: &str,
+    req: &Request<B>,
+) -> Result<Uri, InvalidUri> {
+    let cleansed_path = req.uri().path().replacen(remove_path_substring, "", 1);
     let forward_uri = match req.uri().query() {
         Some(query) => format!("{}{}?{}", forward_url, req.uri().path(), query),
-        None => format!("{}{}", forward_url, req.uri().path()),
+        None => format!("{}{}", forward_url, cleansed_path),
     };
 
     Uri::from_str(forward_uri.as_str())
@@ -183,10 +188,11 @@ fn forward_uri<B>(forward_url: &str, req: &Request<B>) -> Result<Uri, InvalidUri
 fn create_proxied_request<B>(
     client_ip: IpAddr,
     forward_url: &str,
+    remove_path_substring: &str,
     mut request: Request<B>,
 ) -> Result<Request<B>, ProxyError> {
     *request.headers_mut() = remove_hop_headers(request.headers());
-    *request.uri_mut() = forward_uri(forward_url, &request)?;
+    *request.uri_mut() = forward_uri(forward_url, remove_path_substring, &request)?;
 
     let x_forwarded_for_header_name = "x-forwarded-for";
 
@@ -208,9 +214,11 @@ fn create_proxied_request<B>(
 pub async fn call(
     client_ip: IpAddr,
     forward_uri: &str,
+    remove_path_substring: &str,
     request: Request<Body>,
 ) -> Result<Response<Body>, ProxyError> {
-    let proxied_request = create_proxied_request(client_ip, &forward_uri, request)?;
+    let proxied_request =
+        create_proxied_request(client_ip, &forward_uri, remove_path_substring, request)?;
 
     let https = hyper_rustls::HttpsConnector::with_native_roots();
     let client: Client<_, hyper::Body> = Client::builder().build(https);
